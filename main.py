@@ -10,12 +10,12 @@ __author__ = "daniel@engvalls.eu"
 
 MCU_TYPE = "ESP8266"
 WOKWI = False
+MOCK_SSD = False
 
 if MCU_TYPE == "ESP8266":
-    pins = {"sda": 5, "scl": 4, "button": 4, "led": 14}
+    pins = {"sda": 12, "scl": 13, "button": 3, "led": 14}
 else:
     pins = {"sda": 21, "scl": 22, "button": 23, "led": 12}
-
 
 SSID = "TOMTEWIFI"
 WELCOME = (
@@ -36,7 +36,7 @@ FORM = b"""
 <form action="/ny" method="POST">
 <p>Ange ny vers:</p>
 <input type="text" name="vers"  required>
-<button type="submit">Submit</button>  
+<button type="submit">Submit</button>
 </form>"""
 
 FN = "jokes.txt"
@@ -161,21 +161,26 @@ async def handler(r, w):
 
 class Scroller:
     def __init__(
-        self,
-        display_controller=None,
-        scl=pins["scl"],
-        sda=pins["sda"],
-        width=128,
-        height=32,
+            self,
+            display_controller=None,
+            scl=pins["scl"],
+            sda=pins["sda"],
+            width=128,
+            height=32,
     ):
-        i2c = I2C(scl=Pin(scl), sda=Pin(sda))
-        self.oled = ssd1306.SSD1306_I2C(width, height, i2c)
+        if not MOCK_SSD:
+            i2c = I2C(scl=Pin(scl), sda=Pin(sda))
+            self.oled = ssd1306.SSD1306_I2C(width, height, i2c)
+        else:
+            self.oled = None
         self.text_width = 16
         self.t = ""
         self.run = False
         self.display_controller = display_controller
 
     def clear(self):
+        if not self.oled:
+            return
         self.oled.fill(0)
         self.oled.show()
 
@@ -193,6 +198,8 @@ class Scroller:
         return self.text_width + len(t)
 
     async def show_text(self, x=0, y=0):
+        if MOCK_SSD:
+            return
         self.clear()
         self.oled.text(self.t, x, y)
         await uasyncio.sleep_ms(0)
@@ -209,7 +216,7 @@ class Scroller:
         _.pop(0)
         self.set_text("".join(_))
 
-    async def scroll_text(self, t, sleep_time=0.2):
+    async def scroll_text(self, t, sleep_time=50):
         uasyncio.sleep_ms(500)
         self.start()
         fixed_text = fix_letters(t)
@@ -219,7 +226,7 @@ class Scroller:
             if not self.run:
                 break
             await self.show_text()
-            uasyncio.sleep(sleep_time)
+            await uasyncio.sleep_ms(sleep_time)
             self.pop_first_letter()
             if not self.run:
                 break
@@ -256,7 +263,7 @@ class DisplayController:
         else:
             ap = network.WLAN(network.AP_IF)
             ap.active(True)
-            ap.config(essid=SSID)
+            ap.config(essid=SSID, authmode=0)
             while ap.active() == False:
                 uasyncio.sleep_ms(200)
                 pass
@@ -299,10 +306,24 @@ class DisplayController:
 
     async def display_new_text(self, *args):
         self.scroller.stop()
-        r = random.randint(0, len(read_texts()) - 1)
-        print(r)
+
+        def get_rand():
+            return int(str(random.getrandbits(3)))
+
+        r = get_rand()
+        # r = random.randint(0, len(read_texts()) - 1)
+        tot = len(read_texts())
+        for _ in range(0, 10):
+            print(f'{r} of {tot}')
+            if r <= tot:
+                break
+            else:
+                r = get_rand()
+
         try:
-            uasyncio.create_task(self.scroller.scroll_text(read_texts()[r]))
+            t = read_texts()[r]
+            print(f'display: {t}')
+            uasyncio.create_task(self.scroller.scroll_text(t))
         except IndexError as e:
             print(e)
 
